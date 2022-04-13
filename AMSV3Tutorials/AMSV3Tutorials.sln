@@ -15,6 +15,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Common_Utils", "Common_Util
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Live", "Live\Live.csproj", "{1EDEFBD0-86A3-45A5-8A68-CFCD7612B746}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "LiveV2", "LiveV2\LiveV2.csproj", "{C07A979B-DB74-4278-A542-2A0DCB714BBB}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -45,6 +47,10 @@ Global
 		{1EDEFBD0-86A3-45A5-8A68-CFCD7612B746}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1EDEFBD0-86A3-45A5-8A68-CFCD7612B746}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{1EDEFBD0-86A3-45A5-8A68-CFCD7612B746}.Release|Any CPU.Build.0 = Release|Any CPU
+		{C07A979B-DB74-4278-A542-2A0DCB714BBB}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{C07A979B-DB74-4278-A542-2A0DCB714BBB}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{C07A979B-DB74-4278-A542-2A0DCB714BBB}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{C07A979B-DB74-4278-A542-2A0DCB714BBB}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

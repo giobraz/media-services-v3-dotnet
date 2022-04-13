@@ -1,6 +1,7 @@
+﻿using Azure.Identity;
+using Azure.Messaging.EventHubs;
+using Azure.Storage.Blobs;
 using Common_Utils;
-using Microsoft.Azure.EventHubs;
-using Microsoft.Azure.EventHubs.Processor;
 using Microsoft.Azure.Management.Media;
 using Microsoft.Azure.Management.Media.Models;
 using Microsoft.Extensions.Configuration;
@@ -10,6 +11,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
+
 
 ////////////////////////////////////////////////////////////////////////////////////
 //  Azure Media Services Live streaming sample 
@@ -45,13 +47,12 @@ using System.Threading.Tasks;
 //     or CMS system. This can also be created earlier after step 5 if desired.
 ////////////////////////////////////////////////////////////////////////////////////
 
-namespace LiveSample
+namespace LiveV2
 {
     class Program
     {
         // Set this variable to true if you want to authenticate Interactively through the browser using your Azure user account
-        private const bool UseInteractiveAuth = false;
-
+        private const bool UseInteractiveAuth = true;
 
         public static async Task Main(string[] args)
         {
@@ -70,10 +71,8 @@ namespace LiveSample
             ConfigWrapper config = new(new ConfigurationBuilder()
                 .SetBasePath(Directory.GetCurrentDirectory())
                 .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
-                //.AddJsonFile($"appsettings.{Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")}.json" /*, optional: true, reloadOnChange: true*/)
                 .AddEnvironmentVariables() // parses the values from the optional .env file at the solution root
                 .Build());
-
 
             try
             {
@@ -83,13 +82,12 @@ namespace LiveSample
             {
                 if (exception.Source.Contains("ActiveDirectory"))
                 {
-                    Console.Error.WriteLine("TIP: Make sure that you have filled out the appsettings.json file before running this sample.");
+                    Console.Error.WriteLine("TIP: Make sure that you have filled out the appsettings.json or .env file before running this sample.");
                 }
 
                 Console.Error.WriteLine($"{exception.Message}");
 
-                ErrorResponseException apiException = exception.GetBaseException() as ErrorResponseException;
-                if (apiException != null)
+                if (exception.GetBaseException() is ErrorResponseException apiException)
                 {
                     Console.Error.WriteLine(
                         $"ERROR: API call failed with error code '{apiException.Body.Error.Code}' and message '{apiException.Body.Error.Message}'.");
@@ -110,17 +108,7 @@ namespace LiveSample
         private static async Task RunAsync(ConfigWrapper config)
         {
 
-            IAzureMediaServicesClient client;
-            try
-            {
-                client = await Authentication.CreateMediaServicesClientAsync(config, UseInteractiveAuth);
-            }
-            catch (Exception e)
-            {
-                Console.Error.WriteLine("TIP: Make sure that you have filled out the appsettings.json file before running this sample.");
-                Console.Error.WriteLine($"{e.Message}");
-                return;
-            }
+            IAzureMediaServicesClient client = await Authentication.CreateMediaServicesClientAsync(config, UseInteractiveAuth);
 
             // Creating a unique suffix so that we don't have name collisions if you run the sample
             // multiple times without cleaning up.
@@ -133,8 +121,15 @@ namespace LiveSample
             string drvAssetFilterName = "filter-" + uniqueness;
             string streamingLocatorName = "streamingLocator" + uniqueness;
             string streamingEndpointName = "default"; // Change this to your specific streaming endpoint name if not using "default"
-            EventProcessorHost eventProcessorHost = null;
             bool stopEndpoint = false;
+
+            // In this sample, we use Event Grid to listen to the notifications through an Azure Event Hub. 
+            // If you do not provide an Event Hub config in the settings, the sample will fall back to polling the job for status. 
+            // For production ready code, it is always recommended to use Event Grid instead of polling on the Job status. 
+
+            EventProcessorClient processorClient = null;
+            BlobContainerClient storageClient = null;
+            MediaServicesEventProcessor mediaEventProcessor = null;
 
             try
             {
@@ -170,7 +165,7 @@ namespace LiveSample
                 //      IpV4 address with 4 numbers
                 //      CIDR address range  
 
-                IPRange allAllowIPRange = new IPRange(
+                IPRange allAllowIPRange = new(
                     name: "AllowAll",
                     address: "0.0.0.0",
                     subnetPrefixLength: 0
@@ -178,7 +173,7 @@ namespace LiveSample
 
                 // Create the LiveEvent input IP access control object
                 // this will control the IP that the encoder is running on and restrict access to only that encoder IP range.
-                LiveEventInputAccessControl liveEventInputAccess = new LiveEventInputAccessControl
+                LiveEventInputAccessControl liveEventInputAccess = new()
                 {
                     Ip = new IPAccessControl(
                             allow: new IPRange[]
@@ -189,11 +184,12 @@ namespace LiveSample
                                 allAllowIPRange
                             }
                         )
+
                 };
 
                 // Create the LiveEvent Preview IP access control object. 
                 // This will restrict which clients can view the preview endpoint
-                LiveEventPreview liveEventPreview = new LiveEventPreview
+                LiveEventPreview liveEventPreview = new()
                 {
                     AccessControl = new LiveEventPreviewAccessControl(
                         ip: new IPAccessControl(
@@ -207,6 +203,7 @@ namespace LiveSample
                     )
                 };
 
+                #region NewLiveEvent
                 // To get the same ingest URL for the same LiveEvent name:
                 // 1. Set useStaticHostname to true so you have ingest like: 
                 //        rtmps://liveevent-hevc12-eventgridmediaservice-usw22.channel.media.azure.net:2935/live/522f9b27dd2d4b26aeb9ef8ab96c5c77           
@@ -215,7 +212,7 @@ namespace LiveSample
                 // See REST API documentation for details on each setting value
                 // https://docs.microsoft.com/rest/api/media/liveevents/create 
 
-                LiveEvent liveEvent = new LiveEvent(
+                LiveEvent liveEvent = new(
                     location: mediaService.Location,
                     description: "Sample LiveEvent from .NET SDK sample",
                     // Set useStaticHostname to true to make the ingest and preview URL host name the same. 
@@ -234,14 +231,14 @@ namespace LiveSample
                     ),
                     // 2) Set the live event to use pass-through or cloud encoding modes...
                     encoding: new LiveEventEncoding(
-                        // Set this to Standard or Premium1080P to use the cloud live encoder.
+                        // Set this to Standard (720P) or Premium1080P to use the cloud live encoder.
                         // See https://go.microsoft.com/fwlink/?linkid=2095101 for more information
-                        // Otherwise, leave as "None" to use pass-through mode
-                        encodingType: LiveEventEncodingType.None // also known as pass-through mode.
-                                                                 // OPTIONAL settings when using live cloud encoding type:
-                                                                 // keyFrameInterval: "PT2S", //If this value is not set for an encoding live event, the fragment duration defaults to 2 seconds. The value cannot be set for pass-through live events.
-                                                                 // presetName: null, // only used for custom defined presets. 
-                                                                 //stretchMode: "None" // can be used to determine stretch on encoder mode
+                        // Otherwise, set to PassthroughBasic or PassthroughStandard to use the two different pass-through modes. 
+                        encodingType: LiveEventEncodingType.PassthroughStandard // Choose the type of live event - standard or basic pass-through, or the encoding types for 720P or 1080P
+                                                                                // OPTIONAL settings when using live cloud encoding type:
+                                                                                // keyFrameInterval: "PT2S", //If this value is not set for an encoding live event, the fragment duration defaults to 2 seconds. The value cannot be set for pass-through live events.
+                                                                                // presetName: null, // only used for custom defined presets. 
+                                                                                //stretchMode: "None" // can be used to determine stretch on encoder mode
                     ),
                     // 3) Set up the Preview endpoint for monitoring based on the settings above we already set.
                     preview: liveEventPreview,
@@ -256,7 +253,7 @@ namespace LiveSample
                         StreamOptionsFlag.LowLatency
                     }
                 //,
-                // 5) Optionally enable live transcriptions if desired. 
+                // 5) Optionally enable live transcriptions if desired. This is only supported on PassthroughStandard, and the transcoding live event types. It is not supported on Basic pass-through type.
                 // WARNING : This is extra cost ($$$), so please check pricing before enabling.
                 /*transcriptions:new List<LiveEventTranscription>(){
                     new LiveEventTranscription(
@@ -268,25 +265,39 @@ namespace LiveSample
                     )
                 }*/
                 );
-
+                #endregion NewLiveEvent
 
                 // Start monitoring LiveEvent events using Event Grid and Event Hub
                 try
                 {
                     // Please refer README for Event Hub and storage settings.
-                    Console.WriteLine("Starting monitoring LiveEvent events...");
-                    string StorageConnectionString = string.Format("DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1}",
-                        config.StorageAccountName, config.StorageAccountKey);
+                    // A storage account is required to process the Event Hub events from the Event Grid subscription in this sample.
 
                     // Create a new host to process events from an Event Hub.
-                    Console.WriteLine("Creating a new host to process events from an Event Hub...");
-                    eventProcessorHost = new EventProcessorHost(config.EventHubName,
-                        PartitionReceiver.DefaultConsumerGroupName, config.EventHubConnectionString,
-                        StorageConnectionString, config.StorageContainerName);
+                    Console.WriteLine("Creating a new client to process events from an Event Hub...");
+                    var credential = new DefaultAzureCredential();
+                    var storageConnectionString = string.Format("DefaultEndpointsProtocol=https;AccountName={0};AccountKey={1}",
+                       config.StorageAccountName, config.StorageAccountKey);
+                    var blobContainerName = config.StorageContainerName;
+                    var eventHubsConnectionString = config.EventHubConnectionString;
+                    var eventHubName = config.EventHubName;
+                    var consumerGroup = config.EventHubConsumerGroup;
 
-                    // Registers the Event Processor Host and starts receiving messages.
-                    await eventProcessorHost.RegisterEventProcessorFactoryAsync(new MediaServicesEventProcessorFactory(liveEventName),
-                        EventProcessorOptions.DefaultOptions);
+                    storageClient = new BlobContainerClient(
+                        storageConnectionString,
+                        blobContainerName);
+
+                    processorClient = new EventProcessorClient(
+                        storageClient,
+                        consumerGroup,
+                        eventHubsConnectionString,
+                        eventHubName);
+
+                    mediaEventProcessor = new MediaServicesEventProcessor(null, null, liveEventName);
+                    processorClient.ProcessEventAsync += mediaEventProcessor.ProcessEventsAsync;
+                    processorClient.ProcessErrorAsync += mediaEventProcessor.ProcessErrorAsync;
+
+                    await processorClient.StartProcessingAsync();
                 }
                 catch (Exception e)
                 {
@@ -348,7 +359,7 @@ namespace LiveSample
                 watch = Stopwatch.StartNew();
                 // See the REST API for details on each of the settings on Live Output
                 // https://docs.microsoft.com/rest/api/media/liveoutputs/create
-                LiveOutput liveOutput = new LiveOutput(
+                LiveOutput liveOutput = new(
                     assetName: asset.Name,
                     manifestName: manifestName, // The HLS and DASH manifest file name. This is recommended to set if you want a deterministic manifest path up front.
                                                 // archive window can be set from 3 minutes to 25 hours. Content that falls outside of ArchiveWindowLength
@@ -413,7 +424,7 @@ namespace LiveSample
                 var ignoredInput = Console.ReadLine();
 
 
-                AssetFilter drvAssetFilter = new AssetFilter(
+                AssetFilter drvAssetFilter = new(
                    presentationTimeRange: new PresentationTimeRange(
                        forceEndTimestamp: false,
                        // 10 minute (600) seconds sliding window
@@ -431,8 +442,10 @@ namespace LiveSample
                 Console.WriteLine($"Creating a streaming locator named {streamingLocatorName}");
                 Console.WriteLine();
 
-                IList<string> filters = new List<string>();
-                filters.Add(drvAssetFilterName);
+                IList<string> filters = new List<string>
+                {
+                    drvAssetFilterName
+                };
                 StreamingLocator locator = await client.StreamingLocators.CreateAsync(config.ResourceGroup,
                     config.AccountName,
                     drvStreamingLocatorName,
@@ -457,9 +470,6 @@ namespace LiveSample
                 }
                 #endregion
 
-                // Get the url to stream the output
-                var paths = await client.StreamingLocators.ListPathsAsync(config.ResourceGroup, config.AccountName, streamingLocatorName);
-
                 Console.WriteLine("The urls to stream the output from a client:");
                 Console.WriteLine();
 
@@ -470,8 +480,16 @@ namespace LiveSample
 
                 var hostname = streamingEndpoint.HostName;
                 var scheme = "https";
-                BuildManifestPaths(scheme, hostname, locator.StreamingLocatorId.ToString(), manifestName);
+                List<string> manifests = BuildManifestPaths(scheme, hostname, locator.StreamingLocatorId.ToString(), manifestName);
 
+                Console.WriteLine($"The HLS (MP4) manifest for the Live stream  : {manifests[0]}");
+                Console.WriteLine("Open the following URL to playback the live stream in an HLS compliant player (HLS.js, Shaka, ExoPlayer) or directly in an iOS device");
+                Console.WriteLine($"{manifests[0]}");
+                Console.WriteLine();
+                Console.WriteLine($"The DASH manifest for the Live stream is : {manifests[1]}");
+                Console.WriteLine("Open the following URL to playback the live stream from the LiveOutput in the Azure Media Player");
+                Console.WriteLine($"https://ampdemo.azureedge.net/?url={manifests[1]}&heuristicprofile=lowlatency");
+                Console.WriteLine();
                 Console.WriteLine("Continue experimenting with the stream until you are ready to finish.");
                 Console.WriteLine("Press enter to stop the LiveOutput...");
                 Console.Out.Flush();
@@ -490,13 +508,30 @@ namespace LiveSample
                             StreamingPolicyName = PredefinedStreamingPolicy.ClearStreamingOnly
                         });
                     Console.WriteLine("To playback the archived on-demand asset, Use the following urls:");
-                    BuildManifestPaths(scheme, hostname, archiveLocator.StreamingLocatorId.ToString(), manifestName);
+                    manifests = BuildManifestPaths(scheme, hostname, archiveLocator.StreamingLocatorId.ToString(), manifestName);
+                    Console.WriteLine($"The HLS (MP4) manifest for the archived asset without a DVR filter is : {manifests[0]}");
+                    Console.WriteLine("Open the following URL to playback the live stream in an HLS compliant player (HLS.js, Shaka, ExoPlayer) or directly in an iOS device");
+                    Console.WriteLine($"{manifests[0]}");
+                    Console.WriteLine();
+                    Console.WriteLine($"The DASH manifest URL for the archived asset without a DVR filter  : {manifests[1]}");
+                    Console.WriteLine("Open the following URL to playback the live stream from the LiveOutput in the Azure Media Player");
+                    Console.WriteLine($"https://ampdemo.azureedge.net/?url={manifests[1]}&heuristicprofile=lowlatency");
+                    Console.WriteLine();
+                    Console.WriteLine("Continue experimenting with the stream until you are ready to finish.");
+                    Console.WriteLine("Press enter to stop the LiveOutput...");
+                    Console.Out.Flush();
+                    ignoredInput = Console.ReadLine();
+
+                    Console.WriteLine("Experiment with playback of the live archive showing the full asset duration with the filter removed from the Streaming Locator");
+                    Console.WriteLine("Press enter to stop and cleanup the sample...");
+                    Console.Out.Flush();
+                    ignoredInput = Console.ReadLine();
                 }
 
             }
             catch (ErrorResponseException e)
             {
-                Console.WriteLine("Hit ApiErrorException");
+                Console.WriteLine("Hit ErrorResponseException");
                 Console.WriteLine($"\tCode: {e.Body.Error.Code}");
                 Console.WriteLine($"\tCode: {e.Body.Error.Message}");
                 Console.WriteLine();
@@ -513,9 +548,18 @@ namespace LiveSample
                 await CleanupLocatorandAssetAsync(client, config.ResourceGroup, config.AccountName, streamingLocatorName, assetName);
 
                 // Stop event monitoring.
-                if (eventProcessorHost != null)
+                if (processorClient != null)
                 {
-                    await eventProcessorHost.UnregisterEventProcessorAsync();
+                    Console.WriteLine("Job final state received, Stopping the event processor...");
+                    await processorClient.StopProcessingAsync();
+                    Console.WriteLine();
+
+                    // It is encouraged that you unregister your handlers when you have
+                    // finished using the Event Processor to ensure proper cleanup.  This
+                    // is especially important when using lambda expressions or handlers
+                    // in any form that may contain closure scopes or hold other references.
+                    processorClient.ProcessEventAsync -= mediaEventProcessor.ProcessEventsAsync;
+                    processorClient.ProcessErrorAsync -= mediaEventProcessor.ProcessErrorAsync;
                 }
 
                 if (stopEndpoint)
@@ -535,26 +579,25 @@ namespace LiveSample
             }
         }
 
-        private static void BuildManifestPaths(string scheme, string hostname, string streamingLocatorId, string manifestName)
+        private static List<string> BuildManifestPaths(string scheme, string hostname, string streamingLocatorId, string manifestName)
         {
             const string hlsFormat = "format=m3u8-cmaf";
             const string dashFormat = "format=mpd-time-cmaf";
 
+            List<string> manifests = new();
+
             var manifestBase = $"{scheme}://{hostname}/{streamingLocatorId}/{manifestName}.ism/manifest";
             var hlsManifest = $"{manifestBase}({hlsFormat})";
-            Console.WriteLine($"The HLS (MP4) manifest URL is : {hlsManifest}");
-            Console.WriteLine("Open the following URL to playback the live stream in an HLS compliant player (HLS.js, Shaka, ExoPlayer) or directly in an iOS device");
-            Console.WriteLine($"{hlsManifest}");
-            Console.WriteLine();
+            manifests.Add(hlsManifest);
 
             var dashManifest = $"{manifestBase}({dashFormat})";
-            Console.WriteLine($"The DASH manifest URL is : {dashManifest}");
-            Console.WriteLine("Open the following URL to playback the live stream from the LiveOutput in the Azure Media Player");
-            Console.WriteLine($"https://ampdemo.azureedge.net/?url={dashManifest}&heuristicprofile=lowlatency");
-            Console.WriteLine();
-        }
-        // <CleanupLiveEventAndOutput>
+            manifests.Add(dashManifest);
 
+            return manifests;
+        }
+
+
+        // <CleanupLiveEventAndOutput>
         private static async Task CleanupLiveEventAndOutputAsync(IAzureMediaServicesClient client, string resourceGroup, string accountName, string liveEventName, string liveOutputName)
         {
             try
@@ -569,21 +612,24 @@ namespace LiveSample
                 String elapsedTime = String.Format(":{0:00}.{1:00}", watch.Elapsed.Seconds, watch.Elapsed.Milliseconds / 10);
                 Console.WriteLine($"Delete Live Output run time : {elapsedTime}");
 
-                if (liveEvent.ResourceState == LiveEventResourceState.Running)
+                if (liveEvent != null)
                 {
-                    watch = Stopwatch.StartNew();
-                    // If the LiveEvent is running, stop it and have it remove any LiveOutputs
-                    await client.LiveEvents.StopAsync(resourceGroup, accountName, liveEventName, removeOutputsOnStop: false);
-                    elapsedTime = String.Format(":{0:00}.{1:00}", watch.Elapsed.Seconds, watch.Elapsed.Milliseconds / 10);
-                    Console.WriteLine($"Stop Live Event run time : {elapsedTime}");
-                }
+                    if (liveEvent.ResourceState == LiveEventResourceState.Running)
+                    {
+                        watch = Stopwatch.StartNew();
+                        // If the LiveEvent is running, stop it and have it remove any LiveOutputs
+                        await client.LiveEvents.StopAsync(resourceGroup, accountName, liveEventName, removeOutputsOnStop: false);
+                        elapsedTime = String.Format(":{0:00}.{1:00}", watch.Elapsed.Seconds, watch.Elapsed.Milliseconds / 10);
+                        Console.WriteLine($"Stop Live Event run time : {elapsedTime}");
+                    }
 
-                // Delete the LiveEvent
-                await client.LiveEvents.DeleteAsync(resourceGroup, accountName, liveEventName);
+                    // Delete the LiveEvent
+                    await client.LiveEvents.DeleteAsync(resourceGroup, accountName, liveEventName);
+                }
             }
             catch (ErrorResponseException e)
             {
-                Console.WriteLine("CleanupLiveEventAndOutputAsync -- Hit ApiErrorException");
+                Console.WriteLine("CleanupLiveEventAndOutputAsync -- Hit ErrorResponseException");
                 Console.WriteLine($"\tCode: {e.Body.Error.Code}");
                 Console.WriteLine($"\tCode: {e.Body.Error.Message}");
                 Console.WriteLine();
@@ -604,7 +650,7 @@ namespace LiveSample
             }
             catch (ErrorResponseException e)
             {
-                Console.WriteLine("CleanupLocatorandAssetAsync -- Hit ApiErrorException");
+                Console.WriteLine("CleanupLocatorandAssetAsync -- Hit ErrorResponseException");
                 Console.WriteLine($"\tCode: {e.Body.Error.Code}");
                 Console.WriteLine($"\tCode: {e.Body.Error.Message}");
                 Console.WriteLine();
@@ -614,4 +660,3 @@ namespace LiveSample
 
     }
 }
-
