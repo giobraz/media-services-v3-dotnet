@@ -6,6 +6,7 @@ using Microsoft.Azure.Management.Media.Models;
 using Microsoft.Extensions.Configuration;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Threading.Tasks;
@@ -14,12 +15,13 @@ namespace AnalyzeVideos
 {
     class Program
     {
-        private const string VideoAnalyzerTransformName = "MyVideoAnalyzerTransformName";
-        private const string InputMP4FileName = @"ignite.mp4";
+        private const string VideoAnalyzerTransformName = "MyVideoAnalyzerTransformName-IT";
+        //private const string InputMP4FileName = @"ignite.mp4";
+        private const string InputMP4FileName = @"luca.mp4";
         private const string OutputFolderName = @"Output";
 
         // Set this variable to true if you want to authenticate Interactively through the browser using your Azure user account
-        private const bool UseInteractiveAuth = false;
+        private const bool UseInteractiveAuth = true;
 
         public static async Task Main(string[] args)
         {
@@ -27,19 +29,19 @@ namespace AnalyzeVideos
             // If Visual Studio is used, let's read the .env file which should be in the root folder (same folder than the solution .sln file).
             // Same code will work in VS Code, but VS Code uses also launch.json to get the .env file.
             // You can create this ".env" file by saving the "sample.env" file as ".env" file and fill it with the right values.
-            try
-            {
-                DotEnv.Load(".env");
-            }
-            catch
-            {
+            //try
+            //{
+            //    DotEnv.Load(".env");
+            //}
+            //catch
+            //{
 
-            }
+            //}
 
             ConfigWrapper config = new(new ConfigurationBuilder()
                 .SetBasePath(Directory.GetCurrentDirectory())
-                .AddJsonFile("appsettings.json", optional: true, reloadOnChange: true)
-                .AddEnvironmentVariables() // parses the values from the optional .env file at the solution root
+                .AddJsonFile($"appsettings.{Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT")}.json" /*, optional: true, reloadOnChange: true*/)
+                //.AddEnvironmentVariables() // parses the values from the optional .env file at the solution root
                 .Build());
 
             try
@@ -74,6 +76,9 @@ namespace AnalyzeVideos
         // <RunAsync>
         private static async Task RunAsync(ConfigWrapper config)
         {
+            Stopwatch stopWatch = new Stopwatch();
+            stopWatch.Start();
+
             IAzureMediaServicesClient client;
             try
             {
@@ -103,7 +108,11 @@ namespace AnalyzeVideos
             // This preset enables you to extract multiple audio and video insights from a video. 
             // In the example, the language ("en-US") is passed to its constructor. 
             // You can also specify what insights you want to extract by passing InsightsToExtract to the constructor, and which audio mode (standard or basic).
-            _ = await GetOrCreateTransformAsync(client, config.ResourceGroup, config.AccountName, VideoAnalyzerTransformName, new VideoAnalyzerPreset("en-US"));
+            _ = await GetOrCreateTransformAsync(client, config.ResourceGroup, config.AccountName, VideoAnalyzerTransformName, 
+                new VideoAnalyzerPreset(
+                    audioLanguage: "it-IT", 
+                    insightsToExtract: InsightsType.AudioInsightsOnly
+                    ));
 
             // Create a new input Asset and upload the specified local video file into it.
             await CreateInputAssetAsync(client, config.ResourceGroup, config.AccountName, inputAssetName, InputMP4FileName);
@@ -129,6 +138,16 @@ namespace AnalyzeVideos
 
                 await DownloadOutputAssetAsync(client, config.ResourceGroup, config.AccountName, outputAsset.Name, OutputFolderName);
             }
+
+            stopWatch.Stop();
+            // Get the elapsed time as a TimeSpan value.
+            TimeSpan ts = stopWatch.Elapsed;
+
+            // Format and display the TimeSpan value.
+            string elapsedTime = String.Format("{0:00}:{1:00}:{2:00}.{3:00}",
+                ts.Hours, ts.Minutes, ts.Seconds,
+                ts.Milliseconds / 10);
+            Console.WriteLine("RunTime " + elapsedTime);
 
             Console.WriteLine("Done.");
             Console.WriteLine("When finished press enter to cleanup.");
