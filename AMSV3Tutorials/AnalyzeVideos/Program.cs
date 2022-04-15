@@ -113,7 +113,7 @@ namespace AnalyzeVideos
 
             // Ensure that you have the desired encoding Transform. This is really a one time setup operation.
             // Once it is created, we won't delete it.
-            _ = await GetOrCreateTransformAsync(client, config.ResourceGroup, config.AccountName, VideoAnalyzerTransformName, preset);
+            Transform transform = await GetOrCreateTransformAsync(client, config.ResourceGroup, config.AccountName, VideoAnalyzerTransformName, preset);
 
             // Create a new input Asset and upload the specified local video file into it.
             await CreateInputAssetAsync(client, config.ResourceGroup, config.AccountName, inputAssetName, InputMP4FileName);
@@ -124,7 +124,7 @@ namespace AnalyzeVideos
             // Output from the encoding Job must be written to an Asset, so let's create one
             Asset outputAsset = await CreateOutputAssetAsync(client, config.ResourceGroup, config.AccountName, outputAssetName);
 
-            Job job = await SubmitJobAsync(client, config.ResourceGroup, config.AccountName, VideoAnalyzerTransformName, jobName, jobInput, outputAsset.Name);
+            Job job = await SubmitJobAsync(client, config.ResourceGroup, config.AccountName, transform.Name, jobName, jobInput, outputAsset.Name);
 
             // In this sample, we use Event Grid to listen to the notifications through an Azure Event Hub. 
             // If you do not provide an Event Hub config in the settings, the sample will fall back to polling the job for status. 
