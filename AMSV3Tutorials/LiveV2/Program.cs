@@ -234,7 +234,7 @@ namespace LiveV2
                         // Set this to Standard (720P) or Premium1080P to use the cloud live encoder.
                         // See https://go.microsoft.com/fwlink/?linkid=2095101 for more information
                         // Otherwise, set to PassthroughBasic or PassthroughStandard to use the two different pass-through modes. 
-                        encodingType: LiveEventEncodingType.PassthroughStandard // Choose the type of live event - standard or basic pass-through, or the encoding types for 720P or 1080P
+                        encodingType: LiveEventEncodingType.PassthroughBasic // Choose the type of live event - standard or basic pass-through, or the encoding types for 720P or 1080P
                                                                                 // OPTIONAL settings when using live cloud encoding type:
                                                                                 // keyFrameInterval: "PT2S", //If this value is not set for an encoding live event, the fragment duration defaults to 2 seconds. The value cannot be set for pass-through live events.
                                                                                 // presetName: null, // only used for custom defined presets. 
@@ -337,7 +337,6 @@ namespace LiveV2
                 #endregion
 
 
-
                 #region CreateAsset
                 // Create an Asset for the LiveOutput to use. Think of this as the "tape" that will be recorded to. 
                 // The asset entity points to a folder/container in your Azure Storage account. 
@@ -377,7 +376,6 @@ namespace LiveV2
                 Console.WriteLine();
                 #endregion
 
-
                 Console.WriteLine("Starting the Live Event now... please stand by as this can take time...");
                 watch = Stopwatch.StartNew();
                 // Start the Live Event - this will take some time...
@@ -401,6 +399,7 @@ namespace LiveV2
                 Console.WriteLine();
                 #endregion
 
+
                 #region GetPreviewURLs
                 // Use the previewEndpoint to preview and verify
                 // that the input from the encoder is actually being received
@@ -415,6 +414,7 @@ namespace LiveV2
                 Console.WriteLine($"\thttps://ampdemo.azureedge.net/?url={previewEndpoint}&heuristicprofile=lowlatency");
                 Console.WriteLine();
                 #endregion
+
 
                 Console.WriteLine("Start the live stream now, sending the input to the ingest url and verify that it is arriving with the preview url.");
                 Console.WriteLine("IMPORTANT TIP!: Make ABSOLUTLEY CERTAIN that the video is flowing to the Preview URL before continuing!");
@@ -472,53 +472,6 @@ namespace LiveV2
 
                 Console.WriteLine("The urls to stream the output from a client:");
                 Console.WriteLine();
-
-
-                // TODO: incastrare qui il pezzo di analisi dello streaming. La parte di subclipping si può prendere dalla versione V2 (forse), l'analisi video dal progetto AnalyzeVideo               
-                #region Video Analysis
-
-                // Variabili per l'analisi video
-                string jobName = $"job-{uniqueness}";
-                string outputAssetName = $"output-{uniqueness}";
-                var videoAnalyzerTransformName = "MyVideoAnalyzerTransformName-IT";
-                var outputFolderName = @"Output";
-
-                // Create a video analyzer preset with video insights.
-                Preset preset = new VideoAnalyzerPreset(
-                        audioLanguage: "it-IT",
-                        insightsToExtract: InsightsType.AudioInsightsOnly
-                        );
-
-                // Ensure that you have the desired encoding Transform. This is really a one time setup operation.
-                // Once it is created, we won't delete it.
-                Transform transform = await GetOrCreateVideoAnalysisTransformAsync(client, config.ResourceGroup, config.AccountName, videoAnalyzerTransformName, preset);
-
-                // Use the name of the created input asset to create the job input.
-                JobInput jobInput = new JobInputAsset(assetName: asset.Name);
-
-                // Output from the encoding Job must be written to an Asset, so let's create one
-                Asset outputAsset = await CreateOutputAssetAsync(client, config.ResourceGroup, config.AccountName, outputAssetName);
-
-                Job job = await SubmitJobAsync(client, config.ResourceGroup, config.AccountName, transform.Name, jobName, jobInput, outputAsset.Name);
-
-                // TODO implementare struttura con Event Hub
-                //
-                // Polling is not a recommended best practice for production applications because of the latency it introduces.
-                // Overuse of this API may trigger throttling. Developers should instead use Event Grid.
-                Console.WriteLine("Polling job status...");
-                job = await WaitForJobToFinishAsync(client, config.ResourceGroup, config.AccountName, videoAnalyzerTransformName, jobName);
-
-                if (job.State == JobState.Finished)
-                {
-                    Console.WriteLine("++++++++++++++++++++++++++++ Video Analysis job finished ++++++++++++++++++++++++++++");
-                    //if (!Directory.Exists(outputFolderName))
-                    //    Directory.CreateDirectory(outputFolderName);
-
-                    //await DownloadOutputAssetAsync(client, config.ResourceGroup, config.AccountName, outputAsset.Name, outputFolderName);
-                }
-
-                #endregion
-
 
                 // The next method "bulidManifestPaths" is a helper to list the streaming manifests for HLS and DASH. 
                 // The paths are only available after the live streaming source has connected. 
@@ -592,7 +545,13 @@ namespace LiveV2
                 Console.WriteLine("CRITICAL WARNING ($$$$) DON'T WASTE MONEY!: - Wait here for the All Clear - this takes a few minutes sometimes to clean up. DO NOT STOP DEBUGGER yet or you will leak billable resources!");
 
                 await CleanupLiveEventAndOutputAsync(client, config.ResourceGroup, config.AccountName, liveEventName, liveOutputName);
-                await CleanupLocatorandAssetAsync(client, config.ResourceGroup, config.AccountName, streamingLocatorName, assetName);
+
+                await CleanupLocatorAsync(client, config.ResourceGroup, config.AccountName, streamingLocatorName);
+
+                // GBR
+                await PostLiveAnalyzer.VideoAnalysis(client, uniqueness, assetName, config);
+
+                await CleanupAssetAsync(client, config.ResourceGroup, config.AccountName, assetName);
 
                 // Stop event monitoring.
                 if (processorClient != null)
@@ -621,7 +580,6 @@ namespace LiveV2
                     Console.WriteLine($"The endpoint {streamingEndpointName} is running. To halt further billing on the endpoint, please stop it in Azure portal or AMS Explorer.");
                 }
 
-                Console.WriteLine("The LiveOutput and LiveEvent are now deleted.  The event is available as an archive and can still be streamed.");
                 Console.WriteLine("All Clear, and all cleaned up. Please double check in the portal to make sure you have not leaked any Live Events, or left any Running still which would result in unwanted billing.");
             }
         }
@@ -644,7 +602,6 @@ namespace LiveV2
         }
 
 
-        // <CleanupLiveEventAndOutput>
         private static async Task CleanupLiveEventAndOutputAsync(IAzureMediaServicesClient client, string resourceGroup, string accountName, string liveEventName, string liveOutputName)
         {
             try
@@ -682,283 +639,40 @@ namespace LiveV2
                 Console.WriteLine();
             }
         }
-        // </CleanupLiveEventAndOutput>
 
-        // <CleanupLocatorAssetAndStreamingEndpoint>
-        private static async Task CleanupLocatorandAssetAsync(IAzureMediaServicesClient client, string resourceGroup, string accountName, string streamingLocatorName, string assetName)
+
+        private static async Task CleanupLocatorAsync(IAzureMediaServicesClient client, string resourceGroup, string accountName, string streamingLocatorName)
         {
             try
             {
                 // Delete the Streaming Locator
                 await client.StreamingLocators.DeleteAsync(resourceGroup, accountName, streamingLocatorName);
 
-                // Delete the Archive Asset
-                await client.Assets.DeleteAsync(resourceGroup, accountName, assetName);
             }
             catch (ErrorResponseException e)
             {
-                Console.WriteLine("CleanupLocatorandAssetAsync -- Hit ErrorResponseException");
+                Console.WriteLine("CleanupLocatorAsync -- Hit ErrorResponseException");
                 Console.WriteLine($"\tCode: {e.Body.Error.Code}");
                 Console.WriteLine($"\tCode: {e.Body.Error.Message}");
                 Console.WriteLine();
             }
         }
-        // </CleanupLocatorAssetAndStreamingEndpoint>
 
-
-
-        #region Video Analysis private methods
-
-        /// <summary>
-        /// If the specified transform exists, get that transform.
-        /// If the it does not exist, creates a new transform with the specified output. 
-        /// In this case, the output is set to encode a video using one of the built-in encoding presets.
-        /// </summary>
-        /// <param name="client">The Media Services client.</param>
-        /// <param name="resourceGroupName">The name of the resource group within the Azure subscription.</param>
-        /// <param name="accountName"> The Media Services account name.</param>
-        /// <param name="transformName">The name of the transform.</param>
-        /// <returns></returns>
-        // <EnsureTransformExists>
-        private static async Task<Transform> GetOrCreateVideoAnalysisTransformAsync(IAzureMediaServicesClient client,
-            string resourceGroupName,
-            string accountName,
-            string transformName,
-            Preset preset)
+        private static async Task CleanupAssetAsync(IAzureMediaServicesClient client, string resourceGroup, string accountName, string assetName)
         {
-
-            bool createTransform = false;
-            Transform transform = null;
             try
             {
-                // Does a transform already exist with the desired name? Assume that an existing Transform with the desired name
-                // also uses the same recipe or Preset for processing content.
-                transform = client.Transforms.Get(resourceGroupName, accountName, transformName);
+                // Delete the Archive Asset
+                await client.Assets.DeleteAsync(resourceGroup, accountName, assetName);
             }
-            catch (ErrorResponseException ex) when (ex.Response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            catch (ErrorResponseException e)
             {
-                createTransform = true;
+                Console.WriteLine("CleanupAssetAsync -- Hit ErrorResponseException");
+                Console.WriteLine($"\tCode: {e.Body.Error.Code}");
+                Console.WriteLine($"\tCode: {e.Body.Error.Message}");
+                Console.WriteLine();
             }
-
-            if (createTransform)
-            {
-                // Start by defining the desired outputs.
-                TransformOutput[] outputs = new TransformOutput[]
-                {
-                    new TransformOutput(preset),
-                };
-
-                // Create the Transform with the output defined above
-                transform = await client.Transforms.CreateOrUpdateAsync(resourceGroupName, accountName, transformName, outputs);
-            }
-
-            return transform;
         }
-        // </EnsureTransformExists>
-
-
-        /// <summary>
-        /// Creates an ouput asset. The output from the encoding Job must be written to an Asset.
-        /// </summary>
-        /// <param name="client">The Media Services client.</param>
-        /// <param name="resourceGroupName">The name of the resource group within the Azure subscription.</param>
-        /// <param name="accountName"> The Media Services account name.</param>
-        /// <param name="assetName">The output asset name.</param>
-        /// <returns></returns>
-        // <CreateOutputAsset>
-        private static async Task<Asset> CreateOutputAssetAsync(IAzureMediaServicesClient client, string resourceGroupName, string accountName, string assetName)
-        {
-            bool existingAsset = true;
-            Asset outputAsset;
-            try
-            {
-                // Check if an Asset already exists
-                outputAsset = await client.Assets.GetAsync(resourceGroupName, accountName, assetName);
-            }
-            catch (ErrorResponseException ex) when (ex.Response.StatusCode == System.Net.HttpStatusCode.NotFound)
-            {
-                existingAsset = false;
-            }
-
-            Asset asset = new Asset();
-            string outputAssetName = assetName;
-
-            if (existingAsset)
-            {
-                // Name collision! In order to get the sample to work, let's just go ahead and create a unique asset name
-                // Note that the returned Asset can have a different name than the one specified as an input parameter.
-                // You may want to update this part to throw an Exception instead, and handle name collisions differently.
-                string uniqueness = $"-{Guid.NewGuid():N}";
-                outputAssetName += uniqueness;
-
-                Console.WriteLine("Warning – found an existing Asset with name = " + assetName);
-                Console.WriteLine("Creating an Asset with this name instead: " + outputAssetName);
-            }
-
-            return await client.Assets.CreateOrUpdateAsync(resourceGroupName, accountName, outputAssetName, asset);
-        }
-        // </CreateOutputAsset>
-
-
-        /// <summary>
-        /// Submits a request to Media Services to apply the specified Transform to a given input video.
-        /// </summary>
-        /// <param name="client">The Media Services client.</param>
-        /// <param name="resourceGroupName">The name of the resource group within the Azure subscription.</param>
-        /// <param name="accountName"> The Media Services account name.</param>
-        /// <param name="transformName">The name of the transform.</param>
-        /// <param name="jobName">The (unique) name of the job.</param>
-        /// <param name="jobInput"></param>
-        /// <param name="outputAssetName">The (unique) name of the  output asset that will store the result of the encoding job. </param>
-        // <SubmitJob>
-        private static async Task<Job> SubmitJobAsync(IAzureMediaServicesClient client,
-            string resourceGroupName,
-            string accountName,
-            string transformName,
-            string jobName,
-            JobInput jobInput,
-            string outputAssetName)
-        {
-            JobOutput[] jobOutputs =
-            {
-                new JobOutputAsset(outputAssetName),
-            };
-
-            // In this example, we are assuming that the job name is unique.
-            //
-            // If you already have a job with the desired name, use the Jobs.Get method
-            // to get the existing job. In Media Services v3, Get methods on entities returns null 
-            // if the entity doesn't exist (a case-insensitive check on the name).
-            Job job = await client.Jobs.CreateAsync(
-                resourceGroupName,
-                accountName,
-                transformName,
-                jobName,
-                new Job
-                {
-                    Input = jobInput,
-                    Outputs = jobOutputs,
-                });
-
-            return job;
-        }
-        // </SubmitJob>
-
-
-        /// <summary>
-        /// Polls Media Services for the status of the Job.
-        /// </summary>
-        /// <param name="client">The Media Services client.</param>
-        /// <param name="resourceGroupName">The name of the resource group within the Azure subscription.</param>
-        /// <param name="accountName"> The Media Services account name.</param>
-        /// <param name="transformName">The name of the transform.</param>
-        /// <param name="jobName">The name of the job you submitted.</param>
-        /// <returns></returns>
-        // <WaitForJobToFinish>
-        private static async Task<Job> WaitForJobToFinishAsync(IAzureMediaServicesClient client,
-            string resourceGroupName,
-            string accountName,
-            string transformName,
-            string jobName)
-        {
-            const int SleepIntervalMs = 20 * 1000;
-
-            Job job;
-            do
-            {
-                job = await client.Jobs.GetAsync(resourceGroupName, accountName, transformName, jobName);
-
-                Console.WriteLine($"Job is '{job.State}'.");
-                for (int i = 0; i < job.Outputs.Count; i++)
-                {
-                    JobOutput output = job.Outputs[i];
-                    Console.Write($"\tJobOutput[{i}] is '{output.State}'.");
-                    if (output.State == JobState.Processing)
-                    {
-                        Console.Write($"  Progress (%): '{output.Progress}'.");
-                    }
-
-                    Console.WriteLine();
-                }
-
-                if (job.State != JobState.Finished && job.State != JobState.Error && job.State != JobState.Canceled)
-                {
-                    await Task.Delay(SleepIntervalMs);
-                }
-            }
-            while (job.State != JobState.Finished && job.State != JobState.Error && job.State != JobState.Canceled);
-
-            return job;
-        }
-        // </WaitForJobToFinish>
-
-
-        /// <summary>
-        ///  Downloads the results from the specified output asset, so you can see what you got.
-        /// </summary>
-        /// <param name="client">The Media Services client.</param>
-        /// <param name="resourceGroupName">The name of the resource group within the Azure subscription.</param>
-        /// <param name="accountName"> The Media Services account name.</param>
-        /// <param name="assetName">The output asset.</param>
-        /// <param name="outputFolderName">The name of the folder into which to download the results.</param>
-        // <DownloadResults>
-        private static async Task DownloadOutputAssetAsync(
-            IAzureMediaServicesClient client,
-            string resourceGroup,
-            string accountName,
-            string assetName,
-            string outputFolderName)
-        {
-            if (!Directory.Exists(outputFolderName))
-            {
-                Directory.CreateDirectory(outputFolderName);
-            }
-
-            AssetContainerSas assetContainerSas = await client.Assets.ListContainerSasAsync(
-                resourceGroup,
-                accountName,
-                assetName,
-                permissions: AssetContainerPermission.Read,
-                expiryTime: DateTime.UtcNow.AddHours(1).ToUniversalTime());
-
-            Uri containerSasUrl = new Uri(assetContainerSas.AssetContainerSasUrls.FirstOrDefault());
-            BlobContainerClient container = new BlobContainerClient(containerSasUrl);
-
-            string directory = Path.Combine(outputFolderName, assetName);
-            Directory.CreateDirectory(directory);
-
-            Console.WriteLine($"Downloading output results to '{directory}'...");
-
-            string continuationToken = null;
-            IList<Task> downloadTasks = new List<Task>();
-
-            do
-            {
-                var resultSegment = container.GetBlobs().AsPages(continuationToken);
-
-                foreach (Azure.Page<BlobItem> blobPage in resultSegment)
-                {
-                    foreach (BlobItem blobItem in blobPage.Values)
-                    {
-                        var blobClient = container.GetBlobClient(blobItem.Name);
-                        string filename = Path.Combine(directory, blobItem.Name);
-
-                        downloadTasks.Add(blobClient.DownloadToAsync(filename));
-                    }
-                    // Get the continuation token and loop until it is empty.
-                    continuationToken = blobPage.ContinuationToken;
-                }
-
-
-            } while (continuationToken != "");
-
-            await Task.WhenAll(downloadTasks);
-
-            Console.WriteLine("Download complete.");
-        }
-        // </DownloadResults>
-
-        #endregion
 
     }
 }
