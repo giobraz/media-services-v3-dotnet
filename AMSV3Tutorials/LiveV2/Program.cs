@@ -132,6 +132,10 @@ namespace LiveV2
             BlobContainerClient storageClient = null;
             MediaServicesEventProcessor mediaEventProcessor = null;
 
+
+            // GBR
+            var liveEventAnalyzer = new LiveEventAnalyzer(client, config, uniqueness, assetName);
+
             try
             {
                 // Getting the mediaServices account so that we can use the location to create the
@@ -470,6 +474,16 @@ namespace LiveV2
                 }
                 #endregion
 
+                // GBR              
+                await Task.Run(async () =>
+                {
+                    for (int i = 0; i < 4; i++)
+                    {
+                        await liveEventAnalyzer.LiveAnalysis(i);
+                        await Task.Delay(20);
+                    }
+                });
+
                 Console.WriteLine("The urls to stream the output from a client:");
                 Console.WriteLine();
 
@@ -549,7 +563,9 @@ namespace LiveV2
                 await CleanupLocatorAsync(client, config.ResourceGroup, config.AccountName, streamingLocatorName);
 
                 // GBR
-                await PostLiveAnalyzer.VideoAnalysis(client, uniqueness, assetName, config);
+                // ++++ OLD ++++ await PostLiveAnalyzer.VideoAnalysis(client, uniqueness, assetName, config);
+                //
+                //await liveEventAnalyzer.ExPostAnalysis();
 
                 await CleanupAssetAsync(client, config.ResourceGroup, config.AccountName, assetName);
 

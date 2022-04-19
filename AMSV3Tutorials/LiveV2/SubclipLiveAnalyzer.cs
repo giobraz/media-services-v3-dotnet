@@ -1,4 +1,6 @@
-﻿using Common_Utils;
+﻿using Azure.Data.Tables;
+using Azure.Data.Tables.Models;
+using Common_Utils;
 using LiveV2.Models;
 using Microsoft.Azure.Management.Media;
 using System;
@@ -29,27 +31,36 @@ namespace LiveV2
             TimeSpan duration = TimeSpan.FromSeconds(intervalSec);
 
             // Table storage to store and real the last timestamp processed
-            // Retrieve the storage account from the connection string.
-            CloudStorageAccount storageAccount = new CloudStorageAccount(new StorageCredentials(amsCredentials.StorageAccountName, amsCredentials.StorageAccountKey), true);
+            //CloudStorageAccount storageAccount = new CloudStorageAccount(new StorageCredentials(amsCredentials.StorageAccountName, amsCredentials.StorageAccountKey), true);
+            //CloudTableClient tableClient = storageAccount.CreateCloudTableClient();
 
-            // Create the table client.
-            CloudTableClient tableClient = storageAccount.CreateCloudTableClient();
+            string tableName = "liveanalytics";
+            var storageEndpoint = new Uri($"https://{config.StorageAccountName}.table.core.windows.net");
+            var tableCredentials = new TableSharedKeyCredential(config.StorageAccountName, config.StorageAccountKey);
 
-            // Retrieve a reference to the table.
-            CloudTable table = tableClient.GetTableReference("liveanalytics");
+            var serviceClient = new TableServiceClient(storageEndpoint, tableCredentials);     
+            TableItem table = serviceClient.CreateTableIfNotExists(tableName);
+            Console.WriteLine($"The created table's name is {table.Name}.");
 
-            // Create the table if it doesn't exist.
+            var tableClient = new TableClient(storageEndpoint, tableName, tableCredentials);
+            tableClient.Create();
 
-            if (!table.CreateIfNotExists())
-            {
-                log.Info($"Table {table.Name} already exists");
-            }
-            else
-            {
-                log.Info($"Table {table.Name} created");
-            }
 
-            var lastendtimeInTable = ManifestHelpers.RetrieveLastEndTime(table, programid);
+            //// Retrieve a reference to the table.
+            //CloudTable table = tableClient.GetTableReference("liveanalytics");
+
+            //// Create the table if it doesn't exist.
+
+            //if (!table.CreateIfNotExists())
+            //{
+            //    log.Info($"Table {table.Name} already exists");
+            //}
+            //else
+            //{
+            //    log.Info($"Table {table.Name} created");
+            //}
+
+            var lastendtimeInTable = RetrieveLastEndTime(tableClient, programid);
 
             // Get the manifest data (timestamps)
             var assetmanifestdata = GetManifestTimingData(manifestUri);
@@ -69,7 +80,7 @@ namespace LiveV2
 
             if (lastendtimeInTable != null)
             {
-                lastState = lastendtimeInTable.ProgramState;
+                lastState = lastendtimeInTable.LiveEventState;
                 Console.WriteLine($"Value ProgramState retrieved : {lastState}");
 
                 var lastendtimeInTableValue = TimeSpan.Parse(lastendtimeInTable.LastEndTime);
@@ -100,15 +111,9 @@ namespace LiveV2
                 return;
             }
 
-            // D:\home\site\wwwroot\Presets\LiveSubclip.json
-            //string ConfigurationSubclip = File.ReadAllText(Path.Combine(System.IO.Directory.GetParent(execContext.FunctionDirectory).FullName, "presets", "LiveSubclip.json")).Replace("0:00:00.000000", starttime.Subtract(TimeSpan.FromMilliseconds(100)).ToString()).Replace("0:00:30.000000", duration.Add(TimeSpan.FromMilliseconds(200)).ToString());
+            // TODO job con clip time con V3
 
-            //int priority = 10;
-            //if (data.priority != null)
-            //{
-            //    priority = (int)data.priority;
-            //}
-
+            // TODO dopo i job clip chiudere e aggiornare per il timestamp successivo
 
         }
 
@@ -203,6 +208,14 @@ namespace LiveV2
                 response.Error = true;
             }
             return response;
+        }
+
+
+        private static EndTimeInTable RetrieveLastEndTime(TableClient table, string liveEventID)
+        {
+            return table.Query<EndTimeInTable>(e => e.PartitionKey == liveEventID && e.RowKey == "lastEndTime")
+               .FirstOrDefault();
+
         }
 
 
