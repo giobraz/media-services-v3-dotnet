@@ -17,10 +17,8 @@ using System.Threading.Tasks;
 namespace AnalyzeVideos
 {
     class Program
-    {
-        private const string VideoAnalyzerTransformName = "MyVideoAnalyzerTransformName-IT";
-        //private const string InputMP4FileName = @"ignite.mp4";
-        private const string InputMP4FileName = @"luca.mp4";
+    {       
+        private const string InputMP4FileName = @"test-video.mp4";  //@"luca.mp4"; //@"ignite.mp4";
         private const string OutputFolderName = @"Output";
 
         // Set this variable to true if you want to authenticate Interactively through the browser using your Azure user account
@@ -106,14 +104,18 @@ namespace AnalyzeVideos
             string inputAssetName = $"input-{uniqueness}";
 
             // Create a video analyzer preset with video insights.
+            var audioLanguage = "it-IT";
+            var insightsToExtract = InsightsType.AllInsights;            
             Preset preset = new VideoAnalyzerPreset(
-                    audioLanguage: "it-IT",
-                    insightsToExtract: InsightsType.AudioInsightsOnly
+                    mode: AudioAnalysisMode.Basic,
+                    audioLanguage: audioLanguage,
+                    insightsToExtract: insightsToExtract
                     );
+            string videoAnalyzerTransformName = $"MyVideoAnalyzerTransformName-{audioLanguage}-{insightsToExtract}";
 
             // Ensure that you have the desired encoding Transform. This is really a one time setup operation.
             // Once it is created, we won't delete it.
-            Transform transform = await GetOrCreateTransformAsync(client, config.ResourceGroup, config.AccountName, VideoAnalyzerTransformName, preset);
+            Transform transform = await GetOrCreateTransformAsync(client, config.ResourceGroup, config.AccountName, videoAnalyzerTransformName, preset);
 
             // Create a new input Asset and upload the specified local video file into it.
             await CreateInputAssetAsync(client, config.ResourceGroup, config.AccountName, inputAssetName, InputMP4FileName);
@@ -190,7 +192,7 @@ namespace AnalyzeVideos
                     // Job finished. Cancel the timer.
                     cancellationSource.Cancel();
                     // Get the latest status of the job.
-                    job = await client.Jobs.GetAsync(config.ResourceGroup, config.AccountName, VideoAnalyzerTransformName, jobName);
+                    job = await client.Jobs.GetAsync(config.ResourceGroup, config.AccountName, videoAnalyzerTransformName, jobName);
                 }
                 else
                 {
@@ -206,7 +208,7 @@ namespace AnalyzeVideos
                 // Polling is not a recommended best practice for production applications because of the latency it introduces.
                 // Overuse of this API may trigger throttling. Developers should instead use Event Grid.
                 Console.WriteLine("Polling job status...");
-                job = await WaitForJobToFinishAsync(client, config.ResourceGroup, config.AccountName, VideoAnalyzerTransformName, jobName);
+                job = await WaitForJobToFinishAsync(client, config.ResourceGroup, config.AccountName, videoAnalyzerTransformName, jobName);
             }
             finally
             {
@@ -249,7 +251,7 @@ namespace AnalyzeVideos
             Console.Out.Flush();
             Console.ReadLine();
             Console.WriteLine("Cleaning up...");
-            await CleanUpAsync(client, config.ResourceGroup, config.AccountName, VideoAnalyzerTransformName, job.Name, new List<string> { outputAsset.Name }, null);
+            await CleanUpAsync(client, config.ResourceGroup, config.AccountName, videoAnalyzerTransformName, job.Name, new List<string> { outputAsset.Name }, null);
         }
         // </RunAsync>
 

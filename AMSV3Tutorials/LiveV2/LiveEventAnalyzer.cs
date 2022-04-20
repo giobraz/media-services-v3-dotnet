@@ -35,12 +35,15 @@ namespace LiveV2
             _helper = new MediaServicesHelper(_client, _config.ResourceGroup, _config.AccountName);
 
             // Create a video analyzer preset with video insights.
+            var audioLanguage = "it-IT";
+            var insightsToExtract = InsightsType.AllInsights;
             _preset = new VideoAnalyzerPreset(
-                    audioLanguage: "it-IT",
-                    insightsToExtract: InsightsType.AudioInsightsOnly
+                    audioLanguage: audioLanguage,
+                    insightsToExtract: insightsToExtract
                     );
-            _exPostAnalyzerTransformName = "ExPostAnalyzerTransform-IT";
-            _liveAnalyzerTransformName = "LiveCustomTransform-IT";
+
+            _exPostAnalyzerTransformName = $"ExPostAnalyzerTransform_{audioLanguage}_{insightsToExtract}";
+            _liveAnalyzerTransformName = $"LiveTransform_{audioLanguage}_{insightsToExtract}";
         }
 
         public async Task ExPostAnalysis()

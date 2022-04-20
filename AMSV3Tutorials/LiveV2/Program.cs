@@ -124,17 +124,14 @@ namespace LiveV2
             string streamingEndpointName = "default"; // Change this to your specific streaming endpoint name if not using "default"
             bool stopEndpoint = false;
 
+            var liveEventAnalyzer = new LiveEventAnalyzer(client, config, uniqueness, assetName);
+
             // In this sample, we use Event Grid to listen to the notifications through an Azure Event Hub. 
             // If you do not provide an Event Hub config in the settings, the sample will fall back to polling the job for status. 
             // For production ready code, it is always recommended to use Event Grid instead of polling on the Job status. 
-
             EventProcessorClient processorClient = null;
             BlobContainerClient storageClient = null;
             MediaServicesEventProcessor mediaEventProcessor = null;
-
-
-            // GBR
-            var liveEventAnalyzer = new LiveEventAnalyzer(client, config, uniqueness, assetName);
 
             try
             {
@@ -474,15 +471,20 @@ namespace LiveV2
                 }
                 #endregion
 
-                // GBR              
-                await Task.Run(async () =>
-                {
-                    for (int i = 0; i < 4; i++)
-                    {
-                        await liveEventAnalyzer.LiveAnalysis(i);
-                        await Task.Delay(20);
-                    }
-                });
+
+                #region [GBR] Subclipping test
+
+                //await Task.Run(async () =>
+                //{
+                //    for (int i = 0; i < 4; i++)
+                //    {
+                //        await liveEventAnalyzer.LiveAnalysis(i);
+                //        await Task.Delay(20);
+                //    }
+                //});
+
+                #endregion
+
 
                 Console.WriteLine("The urls to stream the output from a client:");
                 Console.WriteLine();
@@ -563,11 +565,9 @@ namespace LiveV2
                 await CleanupLocatorAsync(client, config.ResourceGroup, config.AccountName, streamingLocatorName);
 
                 // GBR
-                // ++++ OLD ++++ await PostLiveAnalyzer.VideoAnalysis(client, uniqueness, assetName, config);
-                //
-                //await liveEventAnalyzer.ExPostAnalysis();
+                await liveEventAnalyzer.ExPostAnalysis();
 
-                await CleanupAssetAsync(client, config.ResourceGroup, config.AccountName, assetName);
+                //await CleanupAssetAsync(client, config.ResourceGroup, config.AccountName, assetName);
 
                 // Stop event monitoring.
                 if (processorClient != null)
