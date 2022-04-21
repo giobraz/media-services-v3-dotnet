@@ -567,7 +567,7 @@ namespace LiveV2
                 // GBR
                 await liveEventAnalyzer.ExPostAnalysis();
 
-                //await CleanupAssetAsync(client, config.ResourceGroup, config.AccountName, assetName);
+                await CleanupAssetAsync(client, config.ResourceGroup, config.AccountName, assetName);
 
                 // Stop event monitoring.
                 if (processorClient != null)

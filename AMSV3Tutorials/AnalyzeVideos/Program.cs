@@ -17,9 +17,12 @@ using System.Threading.Tasks;
 namespace AnalyzeVideos
 {
     class Program
-    {       
-        private const string InputMP4FileName = @"test-video.mp4";  //@"luca.mp4"; //@"ignite.mp4";
+    {              
         private const string OutputFolderName = @"Output";
+        private const string InputMP4FileName = @"Test Electric80 - Power BI.mp4";
+            //@"test-video.mp4";  
+            //@"luca.mp4"; 
+            //@"ignite.mp4";
 
         // Set this variable to true if you want to authenticate Interactively through the browser using your Azure user account
         private const bool UseInteractiveAuth = true;
@@ -99,19 +102,19 @@ namespace AnalyzeVideos
             // Creating a unique suffix so that we don't have name collisions if you run the sample
             // multiple times without cleaning up.
             string uniqueness = Guid.NewGuid().ToString("N");
-            string jobName = $"job-{uniqueness}";
-            string outputAssetName = $"output-{uniqueness}";
-            string inputAssetName = $"input-{uniqueness}";
+            string jobName = $"videoAnalysisJob_{InputMP4FileName}_{uniqueness}";
+            string outputAssetName = $"videoAnalysisOutput_{InputMP4FileName}_{uniqueness}";
+            string inputAssetName = $"videoAnalysisInput_{InputMP4FileName}_{uniqueness}";
 
             // Create a video analyzer preset with video insights.
-            var audioLanguage = "it-IT";
+            var audioLanguage = "it-IT"; // "en-US";
             var insightsToExtract = InsightsType.AllInsights;            
             Preset preset = new VideoAnalyzerPreset(
-                    mode: AudioAnalysisMode.Basic,
+                    mode: AudioAnalysisMode.Standard,
                     audioLanguage: audioLanguage,
                     insightsToExtract: insightsToExtract
                     );
-            string videoAnalyzerTransformName = $"MyVideoAnalyzerTransformName-{audioLanguage}-{insightsToExtract}";
+            string videoAnalyzerTransformName = $"MyVideoAnalyzerTransformName_{audioLanguage}_{insightsToExtract}";
 
             // Ensure that you have the desired encoding Transform. This is really a one time setup operation.
             // Once it is created, we won't delete it.
